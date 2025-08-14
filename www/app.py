@@ -15,6 +15,13 @@ try:
 except Exception as e:
     ectiers_main = None
 
+def get_secret_value(name: str) -> str:
+    # Mirror main.py secret resolution for display convenience
+    # Prefer OS env and .env so we don't read secrets.toml unnecessarily here
+    val = os.environ.get(name, "")
+    # Don't silently load .env here; Streamlit reloads often and may duplicate work.
+    return val
+
 
 DATA_DIR = os.path.join(os.getcwd(), "data")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
@@ -63,6 +70,11 @@ def parse_id_list(csv_text: str):
 st.set_page_config(page_title="ECTiers Config", page_icon="⚙️", layout="centered")
 st.title("ECTiers Configuration")
 st.caption("Edit your Discord bot settings stored in data/settings.json")
+
+with st.expander("Environment info", expanded=False):
+    st.write("APP_ID set:", bool(os.environ.get("APP_ID")))
+    st.write("PUBLIC_KEY set:", bool(os.environ.get("PUBLIC_KEY")))
+    st.write("TOKEN set:", bool(os.environ.get("TOKEN")))
 
 with st.form("settings_form"):
     current = load_settings()
