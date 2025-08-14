@@ -76,6 +76,58 @@ with st.expander("Environment info", expanded=False):
     st.write("PUBLIC_KEY set:", bool(os.environ.get("PUBLIC_KEY")))
     st.write("TOKEN set:", bool(os.environ.get("TOKEN")))
 
+
+@st.cache_resource(show_spinner=False)
+def get_bot_manager():
+    class BotManager:
+        def __init__(self):
+            self.started = False
+
+        def start(self):
+            if self.started:
+                return
+            if ectiers_main is None:
+                raise RuntimeError("main.py not importable; run Streamlit from project root or fix PYTHONPATH.")
+            try:
+                ectiers_main.run_bot(block=False)
+                self.started = True
+            except Exception as e:
+                raise
+
+        def stop(self):
+            if not self.started:
+                return
+            if ectiers_main is None:
+                raise RuntimeError("main.py not importable")
+            try:
+                ectiers_main.stop_bot()
+            finally:
+                self.started = False
+
+    return BotManager()
+
+
+# Try to auto-start the bot once per user session if a TOKEN is available
+manager = get_bot_manager()
+if 'bot_autostarted' not in st.session_state:
+    token_present = False
+    try:
+        src = st.secrets
+        token_present = bool(src.get('TOKEN') or (isinstance(src.get('discord'), dict) and src['discord'].get('TOKEN')))
+    except Exception:
+        token_present = False
+    if not token_present:
+        token_present = bool(os.environ.get('TOKEN'))
+    if token_present:
+        try:
+            if ectiers_main is not None:
+                importlib.reload(ectiers_main)
+            manager.start()
+            st.session_state['bot_autostarted'] = True
+        except Exception as e:
+            st.session_state['bot_autostarted'] = False
+            st.warning(f"Auto-start failed: {e}")
+
 with st.form("settings_form"):
     current = load_settings()
     results_channel = st.text_input(
@@ -138,27 +190,27 @@ st.markdown(
 
 st.divider()
 st.subheader("Bot control")
-col1, col2 = st.columns(2)
+manager = get_bot_manager()
+col1, col2, col3 = st.columns([1,1,2])
 with col1:
     if st.button("Start bot", type="primary"):
-        if ectiers_main is None:
-            st.error("Could not import main.py. Ensure Streamlit runs from the project root or that the project is on PYTHONPATH.")
-        else:
-            importlib.reload(ectiers_main)
-            try:
-                ectiers_main.run_bot(block=False)
+        try:
+            if ectiers_main is None:
+                st.error("Could not import main.py. Ensure Streamlit runs from the project root or that the project is on PYTHONPATH.")
+            else:
+                importlib.reload(ectiers_main)
+                manager.start()
                 st.success("Bot start requested.")
-            except Exception as e:
-                st.error(f"Failed to start bot: {e}")
+        except Exception as e:
+            st.error(f"Failed to start bot: {e}")
 with col2:
     if st.button("Stop bot"):
-        if ectiers_main is None:
-            st.error("Could not import main.py.")
-        else:
-            try:
-                ectiers_main.stop_bot()
-                st.info("Bot stop requested. It may take a moment to disconnect.")
-            except Exception as e:
-                st.error(f"Failed to stop bot: {e}")
+        try:
+            manager.stop()
+            st.info("Bot stop requested. It may take a moment to disconnect.")
+        except Exception as e:
+            st.error(f"Failed to stop bot: {e}")
+with col3:
+    st.caption("The bot runs in a background thread inside Streamlit. Keep this app running to keep the bot online.")
 
 

@@ -8,6 +8,11 @@ import threading
 import re
 from pathlib import Path
 
+try:  # Optional Streamlit integration (for Streamlit Cloud secrets and loop detection)
+    import streamlit as st  # type: ignore
+except Exception:  # pragma: no cover
+    st = None
+
 try:
     import tomllib  # Python 3.11+
 except Exception:  # pragma: no cover
@@ -91,7 +96,18 @@ def _maybe_migrate_env_to_toml(env_path: str, toml_path: str):
 def load_secrets():
     # 1) OS environment has highest precedence
     secrets = {k: os.environ.get(k) for k in SECRET_KEYS}
-    # 2) .env file (if python-dotenv installed)
+    # 2) Streamlit secrets (supports either top-level or [discord] table)
+    if st is not None:
+        try:
+            src = st.secrets
+            if 'discord' in src:
+                src = src['discord']
+            for k in SECRET_KEYS:
+                if not secrets.get(k) and k in src:
+                    secrets[k] = str(src.get(k))
+        except Exception:
+            pass
+    # 3) .env file (if python-dotenv installed)
     if load_dotenv is not None and os.path.exists('.env'):
         load_dotenv('.env', override=False)
         for k in SECRET_KEYS:
@@ -103,12 +119,12 @@ def load_secrets():
             env_vals = _parse_env_file('.env')
             for k in SECRET_KEYS:
                 secrets[k] = secrets.get(k) or env_vals.get(k)
-    # 3) TOML file
+    # 4) TOML file
     toml_path = 'secrets.toml'
     toml_vals = _load_toml(toml_path)
     for k in SECRET_KEYS:
         secrets[k] = secrets.get(k) or toml_vals.get(k)
-    # 4) env.txt fallback
+    # 5) env.txt fallback
     txt_vals = _parse_env_file('env.txt')
     for k in SECRET_KEYS:
         secrets[k] = secrets.get(k) or txt_vals.get(k)
@@ -128,7 +144,7 @@ PUBLIC_KEY = _secrets.get('PUBLIC_KEY')
 TOKEN = _secrets.get('TOKEN')
 
 if not TOKEN:
-    print("Discord bot TOKEN is missing. Provide it via environment variables, .env, secrets.toml, or env.txt.")
+    print("Discord bot TOKEN is missing. Provide it via Streamlit secrets, environment variables, .env, secrets.toml, or env.txt.")
 
 # Enable required privileged intents
 intents = discord.Intents.default()
@@ -154,6 +170,10 @@ async def main():
         print("Config server started on http://127.0.0.1:8765")
     except Exception as e:
         print(f"Failed to start config server: {e}")
+    # Abort early if token is not set (avoid discord.py type error)
+    if not TOKEN:
+        print("Bot not started because TOKEN is missing.")
+        return
     # Load the Results cog from the commands/results.py file
     await bot.load_extension("commands.results")
     await bot.load_extension("commands.settier")
@@ -205,4 +225,13 @@ def stop_bot():
 
 
 if __name__ == "__main__":
-    run_bot(block=True)
+    # In Streamlit runtime, an event loop is already running; use background mode.
+    running_loop = None
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    if running_loop is not None or st is not None:
+        run_bot(block=False)
+    else:
+        run_bot(block=True)
