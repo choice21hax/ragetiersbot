@@ -1,0 +1,1 @@
+Run /setup results channel:#your-channel roles:Role1,Role2
